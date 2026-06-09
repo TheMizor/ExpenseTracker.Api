@@ -112,6 +112,116 @@ app.MapDelete("/api/categories/{id:int}", async (int id, AppDbContext context) =
 })
 .WithName("DeleteCategory");
 
+app.MapPost("/api/transactions", async (CreateTransactionRequest request, AppDbContext context) =>
+{
+    const int userId = 1;
+
+    if (request.Amount <= 0)
+        return Results.BadRequest("Le montant doit être supérieur à zéro.");
+    if (string.IsNullOrWhiteSpace(request.Label))
+        return Results.BadRequest("Le libellé est requis.");
+
+    var categoryExists = await context.Categories
+        .AnyAsync(c => c.Id == request.CategoryId && c.UserId == userId);
+    if (!categoryExists)
+        return Results.BadRequest("La catégorie n'existe pas.");
+
+    var transaction = new Transaction
+    {
+        Amount = request.Amount,
+        Date = request.Date,
+        Label = request.Label,
+        CategoryId = request.CategoryId,
+        UserId = userId
+    };
+
+    context.Transactions.Add(transaction);
+    await context.SaveChangesAsync();
+
+    var response = new TransactionResponse(transaction.Id, transaction.Amount, transaction.Date, transaction.Label, transaction.CategoryId);
+    return Results.Created($"/api/transactions/{transaction.Id}", response);
+})
+.WithName("CreateTransaction");
+
+app.MapGet("/api/transactions", async (DateOnly? from, DateOnly? to, int? categoryId, AppDbContext context) =>
+{
+    const int userId = 1;
+
+    var query = context.Transactions.Where(t => t.UserId == userId);
+
+    if (from is not null)
+        query = query.Where(t => t.Date >= from);
+    if (to is not null)
+        query = query.Where(t => t.Date <= to);
+    if (categoryId is not null)
+        query = query.Where(t => t.CategoryId == categoryId);
+
+    var transactions = await query
+        .Select(t => new TransactionResponse(t.Id, t.Amount, t.Date, t.Label, t.CategoryId))
+        .ToListAsync();
+
+    return Results.Ok(transactions);
+})
+.WithName("Transactions");
+
+app.MapGet("/api/transactions/{id:int}", async (int id, AppDbContext context) =>
+{
+    const int userId = 1;
+
+    var transaction = await context.Transactions
+        .Where(t => t.Id == id && t.UserId == userId)
+        .Select(t => new TransactionResponse(t.Id, t.Amount, t.Date, t.Label, t.CategoryId))
+        .FirstOrDefaultAsync();
+
+    return transaction is null ? Results.NotFound() : Results.Ok(transaction);
+})
+.WithName("GetTransaction");
+
+app.MapPut("/api/transactions/{id:int}", async (int id, UpdateTransactionRequest request, AppDbContext context) =>
+{
+    const int userId = 1;
+
+    if (request.Amount <= 0)
+        return Results.BadRequest("Le montant doit être supérieur à zéro.");
+    if (string.IsNullOrWhiteSpace(request.Label))
+        return Results.BadRequest("Le libellé est requis.");
+
+    var transaction = await context.Transactions
+        .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+    if (transaction is null)
+        return Results.NotFound();
+
+    var categoryExists = await context.Categories
+        .AnyAsync(c => c.Id == request.CategoryId && c.UserId == userId);
+    if (!categoryExists)
+        return Results.BadRequest("La catégorie n'existe pas.");
+
+    transaction.Amount = request.Amount;
+    transaction.Date = request.Date;
+    transaction.Label = request.Label;
+    transaction.CategoryId = request.CategoryId;
+    await context.SaveChangesAsync();
+
+    return Results.Ok(new TransactionResponse(transaction.Id, transaction.Amount, transaction.Date, transaction.Label, transaction.CategoryId));
+})
+.WithName("UpdateTransaction");
+
+app.MapDelete("/api/transactions/{id:int}", async (int id, AppDbContext context) =>
+{
+    const int userId = 1;
+
+    var transaction = await context.Transactions
+        .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+    if (transaction is null)
+        return Results.NotFound();
+
+    context.Transactions.Remove(transaction);
+    await context.SaveChangesAsync();
+
+    return Results.NoContent();
+})
+.WithName("DeleteTransaction");
+
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
