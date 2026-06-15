@@ -1,8 +1,14 @@
+using System.Security.Claims;
+using System.Text;
 using ExpenseTracker.Api.Data;
 using ExpenseTracker.Api.DTOs;
+using ExpenseTracker.Api.Extensions;
 using ExpenseTracker.Api.Models;
+using ExpenseTracker.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
+using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,7 +19,30 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+builder.Services.AddScoped<TokenService>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true, 
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -24,9 +53,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapGet("/api/categories", async (AppDbContext context) =>
+app.MapGet("/api/categories", async (ClaimsPrincipal user, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var categories = await context.Categories
         .Where(c => c.UserId == userId)
@@ -35,11 +64,12 @@ app.MapGet("/api/categories", async (AppDbContext context) =>
 
     return Results.Ok(categories);
 })
-.WithName("Categories");
+.WithName("Categories")
+.RequireAuthorization();
 
-app.MapPost("/api/categories", async (CreateCategoryRequest request, AppDbContext context) =>
+app.MapPost("/api/categories", async (ClaimsPrincipal user, CreateCategoryRequest request, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     if (string.IsNullOrWhiteSpace(request.Name))
         return Results.BadRequest("Le nom de la catégorie est requis.");
@@ -56,11 +86,12 @@ app.MapPost("/api/categories", async (CreateCategoryRequest request, AppDbContex
     var response = new CategoryResponse(category.Id, category.Name);
     return Results.Created($"/api/categories/{category.Id}", response);
 })
-.WithName("CreateCategory");
+.WithName("CreateCategory")
+.RequireAuthorization();
 
-app.MapGet("/api/categories/{id:int}", async (int id, AppDbContext context) =>
+app.MapGet("/api/categories/{id:int}", async (ClaimsPrincipal user, int id, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var category = await context.Categories
         .Where(c => c.Id == id && c.UserId == userId)
@@ -69,11 +100,12 @@ app.MapGet("/api/categories/{id:int}", async (int id, AppDbContext context) =>
 
     return category is null ? Results.NotFound() : Results.Ok(category);
 })
-.WithName("GetCategory");
+.WithName("GetCategory")
+.RequireAuthorization();
 
-app.MapPut("/api/categories/{id:int}", async (int id, UpdateCategoryRequest request, AppDbContext context) =>
+app.MapPut("/api/categories/{id:int}", async (ClaimsPrincipal user, int id, UpdateCategoryRequest request, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     if (string.IsNullOrWhiteSpace(request.Name))
         return Results.BadRequest("Le nom de la catégorie est requis.");
@@ -89,11 +121,12 @@ app.MapPut("/api/categories/{id:int}", async (int id, UpdateCategoryRequest requ
 
     return Results.Ok(new CategoryResponse(category.Id, category.Name));
 })
-.WithName("UpdateCategory");
+.WithName("UpdateCategory")
+.RequireAuthorization();
 
-app.MapDelete("/api/categories/{id:int}", async (int id, AppDbContext context) =>
+app.MapDelete("/api/categories/{id:int}", async (ClaimsPrincipal user, int id, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var category = await context.Categories
         .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
@@ -110,11 +143,12 @@ app.MapDelete("/api/categories/{id:int}", async (int id, AppDbContext context) =
 
     return Results.NoContent();
 })
-.WithName("DeleteCategory");
+.WithName("DeleteCategory")
+.RequireAuthorization();
 
-app.MapPost("/api/transactions", async (CreateTransactionRequest request, AppDbContext context) =>
+app.MapPost("/api/transactions", async (ClaimsPrincipal user, CreateTransactionRequest request, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     if (request.Amount <= 0)
         return Results.BadRequest("Le montant doit être supérieur à zéro.");
@@ -141,11 +175,12 @@ app.MapPost("/api/transactions", async (CreateTransactionRequest request, AppDbC
     var response = new TransactionResponse(transaction.Id, transaction.Amount, transaction.Date, transaction.Label, transaction.CategoryId);
     return Results.Created($"/api/transactions/{transaction.Id}", response);
 })
-.WithName("CreateTransaction");
+.WithName("CreateTransaction")
+.RequireAuthorization();
 
-app.MapGet("/api/transactions", async (DateOnly? from, DateOnly? to, int? categoryId, AppDbContext context) =>
+app.MapGet("/api/transactions", async (ClaimsPrincipal user, DateOnly? from, DateOnly? to, int? categoryId, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var query = context.Transactions.Where(t => t.UserId == userId);
 
@@ -162,11 +197,12 @@ app.MapGet("/api/transactions", async (DateOnly? from, DateOnly? to, int? catego
 
     return Results.Ok(transactions);
 })
-.WithName("Transactions");
+.WithName("Transactions")
+.RequireAuthorization();
 
-app.MapGet("/api/transactions/{id:int}", async (int id, AppDbContext context) =>
+app.MapGet("/api/transactions/{id:int}", async (ClaimsPrincipal user, int id, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var transaction = await context.Transactions
         .Where(t => t.Id == id && t.UserId == userId)
@@ -175,11 +211,12 @@ app.MapGet("/api/transactions/{id:int}", async (int id, AppDbContext context) =>
 
     return transaction is null ? Results.NotFound() : Results.Ok(transaction);
 })
-.WithName("GetTransaction");
+.WithName("GetTransaction")
+.RequireAuthorization();
 
-app.MapPut("/api/transactions/{id:int}", async (int id, UpdateTransactionRequest request, AppDbContext context) =>
+app.MapPut("/api/transactions/{id:int}", async (ClaimsPrincipal user, int id, UpdateTransactionRequest request, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     if (request.Amount <= 0)
         return Results.BadRequest("Le montant doit être supérieur à zéro.");
@@ -204,11 +241,12 @@ app.MapPut("/api/transactions/{id:int}", async (int id, UpdateTransactionRequest
 
     return Results.Ok(new TransactionResponse(transaction.Id, transaction.Amount, transaction.Date, transaction.Label, transaction.CategoryId));
 })
-.WithName("UpdateTransaction");
+.WithName("UpdateTransaction")
+.RequireAuthorization();
 
-app.MapDelete("/api/transactions/{id:int}", async (int id, AppDbContext context) =>
+app.MapDelete("/api/transactions/{id:int}", async (ClaimsPrincipal user, int id, AppDbContext context) =>
 {
-    const int userId = 1;
+    var userId = user.GetUserId();
 
     var transaction = await context.Transactions
         .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
@@ -220,7 +258,42 @@ app.MapDelete("/api/transactions/{id:int}", async (int id, AppDbContext context)
 
     return Results.NoContent();
 })
-.WithName("DeleteTransaction");
+.WithName("DeleteTransaction")
+.RequireAuthorization();
+
+app.MapPost("/api/auth/register", async (RegisterRequest request, AppDbContext context, TokenService tokenService) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        return Results.BadRequest("Email et mot de passe requis.");
+
+    var emailTaken = await context.Users.AnyAsync(u => u.Email == request.Email);
+    if (emailTaken)
+        return Results.Conflict("Cet email est déjà utilisé.");
+
+    var user = new User
+    {
+        Email = request.Email,
+        PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password)
+    };
+
+    context.Users.Add(user);
+    await context.SaveChangesAsync();
+
+    return Results.Ok(new AuthResponse(tokenService.CreateToken(user)));
+})
+.WithName("Register")
+.RequireAuthorization();
+
+app.MapPost("/api/auth/login", async (LoginRequest request, AppDbContext context, TokenService tokenService) =>
+{
+    var user = await context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+    if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        return Results.Unauthorized();
+
+    return Results.Ok(new AuthResponse(tokenService.CreateToken(user)));
+})
+.WithName("Login")
+.RequireAuthorization();
 
 app.Run();
 
